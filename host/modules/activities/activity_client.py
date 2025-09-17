@@ -1243,3 +1243,98 @@ class ActivityClient:
                 setattr(self, f'_timeout_count_{adapter_id}', 0)
                 # Reset success counter to prevent it from growing indefinitely
                 self._successful_operations[adapter_id] = 0
+
+    # NEW: Methods for SpaceRegistry socket client compatibility
+    def send_message(self, message_data: Dict[str, Any]) -> bool:
+        """
+        Send a message via the activity client (compatibility method for space registry).
+
+        Args:
+            message_data: Message data with format expected by activity client
+
+        Returns:
+            True if message was queued successfully, False otherwise
+        """
+        try:
+            # Create an action from the message data for handle_outgoing_action
+            action = {
+                "payload": message_data
+            }
+
+            # Queue the action via handle_outgoing_action
+            asyncio.create_task(self.handle_outgoing_action(action))
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending message via ActivityClient: {e}")
+            return False
+
+    def send_typing_indicator(self, adapter_id: str, chat_id: str, is_typing: bool = True) -> bool:
+        """
+        Send a typing indicator to an external adapter.
+
+        Args:
+            adapter_id: ID of the adapter to send through
+            chat_id: ID of the chat/conversation
+            is_typing: Whether typing is active (True) or not (False)
+
+        Returns:
+            True if the indicator was queued successfully, False otherwise
+        """
+        try:
+            # Create typing indicator action payload
+            typing_payload = {
+                "action_type": "send_typing_indicator",
+                "adapter_id": adapter_id,
+                "conversation_id": chat_id,
+                "is_typing": is_typing,
+                "internal_request_id": f"typing_{adapter_id}_{chat_id}_{int(time.time())}"
+            }
+
+            action = {
+                "payload": typing_payload
+            }
+
+            # Queue the action via handle_outgoing_action
+            asyncio.create_task(self.handle_outgoing_action(action))
+            logger.debug(f"Queued typing indicator ({is_typing}) for {adapter_id}/{chat_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending typing indicator via ActivityClient: {e}")
+            return False
+
+    def send_error(self, adapter_id: str, chat_id: str, error_message: str) -> bool:
+        """
+        Send an error message to an external adapter.
+
+        Args:
+            adapter_id: ID of the adapter to send through
+            chat_id: ID of the chat/conversation
+            error_message: Error message to send
+
+        Returns:
+            True if the error was queued successfully, False otherwise
+        """
+        try:
+            # Create error message action payload
+            error_payload = {
+                "action_type": "send_message",
+                "adapter_id": adapter_id,
+                "conversation_id": chat_id,
+                "text": f"⚠️ Error: {error_message}",
+                "internal_request_id": f"error_{adapter_id}_{chat_id}_{int(time.time())}"
+            }
+
+            action = {
+                "payload": error_payload
+            }
+
+            # Queue the action via handle_outgoing_action
+            asyncio.create_task(self.handle_outgoing_action(action))
+            logger.debug(f"Queued error message for {adapter_id}/{chat_id}: {error_message}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error sending error message via ActivityClient: {e}")
+            return False

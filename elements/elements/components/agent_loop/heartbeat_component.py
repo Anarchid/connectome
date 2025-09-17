@@ -1,9 +1,11 @@
 import asyncio
 import logging
+import time
 from typing import Optional, Dict, Any, List, Tuple
 
 from ..base_component import Component
 from elements.component_registry import register_component
+from elements.space_registry import get_space_registry
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,10 @@ class HeartbeatComponent(Component):
 		self._preempt_flag = False
 		self._normal_queue: asyncio.Queue[Tuple[Dict[str, Any], Dict[str, Any]]] = asyncio.Queue()
 		self._interrupt_queue: asyncio.Queue[Tuple[Dict[str, Any], Dict[str, Any]]] = asyncio.Queue()
+		
+		# NEW: Track when typing indicators were last sent for each chat
+		self._last_typing_sent: Dict[str, float] = {}  # chat_id -> timestamp
+		self._typing_refresh_interval: float = 8.0  # Refresh typing every 8 seconds (Discord timeout is ~10s)
 
 	def initialize(self, **kwargs) -> None:
 		super().initialize(**kwargs)
@@ -91,6 +97,10 @@ class HeartbeatComponent(Component):
 					await self._process_pulse()
 					await self._refresh_hud_and_cache(self._collect_focus_candidates_from_decider())
 					await self._post_decider_evaluate()
+				
+				# NEW: Check for active LLM completions and send typing indicators
+				await self._check_and_send_typing_indicators()
+				
 				await asyncio.sleep(self._interval_ms / 1000.0)
 		except asyncio.CancelledError:
 			logger.debug("Heartbeat task cancelled")
@@ -184,4 +194,65 @@ class HeartbeatComponent(Component):
 			if decider and hasattr(decider, 'evaluate_and_maybe_activate'):
 				await decider.evaluate_and_maybe_activate({})
 		except Exception as e:
-			logger.debug(f"Heartbeat post-decider evaluate error: {e}") 
+			logger.debug(f"Heartbeat post-decider evaluate error: {e}")
+	
+	async def _check_and_send_typing_indicators(self) -> None:
+		"""
+		Check for active LLM completions and send typing indicators as needed.
+		This ensures typing indicators stay active during long LLM completions.
+		"""
+		try:
+			# Get the agent loop component
+			agent_loop = getattr(self.owner, '_agent_loop', None) if self.owner else None
+			if not agent_loop:
+				return
+			
+			# Check if there are active completions
+			active_completions = agent_loop.get_active_completions() if hasattr(agent_loop, 'get_active_completions') else {}
+			
+			if not active_completions:
+				# No active completions, clear our tracking
+				self._last_typing_sent.clear()
+				return
+			
+			# Get the space registry for sending typing indicators
+			space_registry = get_space_registry()
+			if not space_registry:
+				logger.debug("No space registry available for typing indicators")
+				return
+			
+			# Process each active completion
+			current_time = time.time()
+			for completion_id, context in active_completions.items():
+				adapter_id = context.get('adapter_id')
+				chat_id = context.get('chat_id')
+				
+				if not adapter_id or not chat_id:
+					continue
+				
+				# Check if we need to send/refresh typing for this chat
+				last_sent = self._last_typing_sent.get(chat_id, 0)
+				time_since_last = current_time - last_sent
+				
+				if time_since_last >= self._typing_refresh_interval:
+					# Send typing indicator
+					try:
+						success = space_registry.send_typing_indicator(adapter_id, chat_id, is_typing=True)
+						if success:
+							self._last_typing_sent[chat_id] = current_time
+							logger.debug(f"Sent typing indicator for {adapter_id}/{chat_id} (completion {completion_id[:8]})")
+						else:
+							logger.debug(f"Failed to send typing indicator for {adapter_id}/{chat_id}")
+					except Exception as e:
+						logger.warning(f"Error sending typing indicator: {e}")
+			
+			# Clean up old entries from _last_typing_sent for chats no longer active
+			active_chat_ids = {ctx.get('chat_id') for ctx in active_completions.values() if ctx.get('chat_id')}
+			self._last_typing_sent = {
+				chat_id: timestamp 
+				for chat_id, timestamp in self._last_typing_sent.items() 
+				if chat_id in active_chat_ids
+			}
+			
+		except Exception as e:
+			logger.debug(f"Error in typing indicator check: {e}") 

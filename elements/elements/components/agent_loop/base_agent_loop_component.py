@@ -4,6 +4,8 @@ Defines the abstract base class for agent cognitive cycles.
 """
 import logging
 import asyncio
+import uuid
+import time
 from typing import Dict, Any, Optional, TYPE_CHECKING, List, Set, Type, Union
 from datetime import datetime
 
@@ -81,6 +83,9 @@ class BaseAgentLoopComponent(Component):
 
         # NEW: Cooperative cancellation confirmation event
         self._cancel_event: asyncio.Event = asyncio.Event()
+        
+        # NEW: Track active LLM completions for typing notifications
+        self._active_completions: Dict[str, Dict[str, Any]] = {}  # completion_id -> context
 
         # Convenience accessors, assuming parent_inner_space is correctly typed and populated
         self._llm_provider: Optional['LLMProvider'] = self.parent_inner_space._llm_provider
@@ -164,6 +169,31 @@ class BaseAgentLoopComponent(Component):
             inner_payload = event_payload.get('payload', {})
             focus_context = inner_payload.get('focus_context', {})
             focus_element_id = focus_context.get('focus_element_id')
+            
+            # NEW: Send initial typing indicator when activation starts
+            try:
+                from elements.space_registry import get_space_registry
+                space_registry = get_space_registry()
+                if space_registry and focus_element_id:
+                    # Try to extract adapter and chat IDs for immediate typing
+                    element = self.parent_inner_space.get_element_by_id(focus_element_id)
+                    if element:
+                        chat_id = getattr(element, 'external_conversation_id', None) or \
+                                 getattr(element, 'conversation_id', None)
+                        adapter_id = getattr(element, 'adapter_id', None)
+                        
+                        if not adapter_id or not chat_id:
+                            parent_space = getattr(element, 'get_parent_object', lambda: None)()
+                            if parent_space:
+                                chat_id = chat_id or getattr(parent_space, 'external_conversation_id', None)
+                                adapter_id = adapter_id or getattr(parent_space, 'adapter_id', None)
+                        
+                        if adapter_id and chat_id:
+                            # Send initial typing indicator
+                            space_registry.send_typing_indicator(adapter_id, chat_id, is_typing=True)
+                            logger.debug(f"[{self.agent_loop_name}] Sent initial typing indicator for {adapter_id}/{chat_id}")
+            except Exception as e:
+                logger.debug(f"[{self.agent_loop_name}] Could not send initial typing indicator: {e}")
 
             if focus_element_id:
                 logger.info(f"[{self.agent_loop_name}] Activation with focused context on element: {focus_element_id}")
@@ -260,6 +290,50 @@ class BaseAgentLoopComponent(Component):
             return self.parent_inner_space.id
 
         return None
+
+    def start_completion_tracking(self, adapter_id: str, chat_id: str, focus_element_id: Optional[str] = None) -> str:
+        """
+        Start tracking an active LLM completion for typing notifications.
+        
+        Args:
+            adapter_id: ID of the adapter for sending typing indicators
+            chat_id: ID of the chat/conversation
+            focus_element_id: Optional element ID that has focus
+            
+        Returns:
+            Unique completion ID for this tracking session
+        """
+        completion_id = str(uuid.uuid4())
+        self._active_completions[completion_id] = {
+            'start_time': time.time(),
+            'adapter_id': adapter_id,
+            'chat_id': chat_id,
+            'focus_element_id': focus_element_id
+        }
+        logger.debug(f"[{self.agent_loop_name}] Started tracking completion {completion_id[:8]} for {adapter_id}/{chat_id}")
+        return completion_id
+    
+    def end_completion_tracking(self, completion_id: str) -> None:
+        """
+        End tracking for a completed or failed LLM completion.
+        
+        Args:
+            completion_id: The ID returned from start_completion_tracking
+        """
+        if completion_id in self._active_completions:
+            context = self._active_completions[completion_id]
+            duration = time.time() - context['start_time']
+            logger.debug(f"[{self.agent_loop_name}] Ended tracking completion {completion_id[:8]} after {duration:.1f}s")
+            del self._active_completions[completion_id]
+    
+    def get_active_completions(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all currently active LLM completions being tracked.
+        
+        Returns:
+            Dictionary of completion_id -> context for all active completions
+        """
+        return self._active_completions.copy()
 
     def _resolve_prefix_to_element_id(self, prefix: str) -> Optional[str]:
         """

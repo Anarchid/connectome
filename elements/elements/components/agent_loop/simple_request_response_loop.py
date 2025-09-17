@@ -109,8 +109,57 @@ class SimpleRequestResponseLoopComponent(BaseAgentLoopComponent):
                 logger.warning(f"Failed to cache LLM context: {cache_error}")
 
             # 4. Send rendered context + tools to LLM
+            # NEW: Extract typing context from focus_context or pipeline options
+            completion_id = None
+            try:
+                # Try to extract adapter and chat IDs from focus context
+                adapter_id = None
+                chat_id = None
+                
+                if focus_context:
+                    # Extract from focus_context which should have conversation info
+                    focus_element_id = focus_context.get('focus_element_id')
+                    if focus_element_id:
+                        # Get the element to find its conversation ID
+                        element = self.parent_inner_space.get_element_by_id(focus_element_id)
+                        if element:
+                            # Look for conversation ID in element or its parent
+                            chat_id = getattr(element, 'external_conversation_id', None) or \
+                                     getattr(element, 'conversation_id', None)
+                            adapter_id = getattr(element, 'adapter_id', None)
+                            
+                            # If not on element, check parent space
+                            if not adapter_id or not chat_id:
+                                parent_space = getattr(element, 'get_parent_object', lambda: None)()
+                                if parent_space:
+                                    chat_id = chat_id or getattr(parent_space, 'external_conversation_id', None)
+                                    adapter_id = adapter_id or getattr(parent_space, 'adapter_id', None)
+                
+                # Start tracking if we have the necessary context
+                if adapter_id and chat_id:
+                    completion_id = self.start_completion_tracking(adapter_id, chat_id, 
+                                                                  focus_context.get('focus_element_id') if focus_context else None)
+                    logger.debug(f"Started typing tracking for {adapter_id}/{chat_id}")
+                else:
+                    logger.debug(f"Could not extract typing context - adapter_id: {adapter_id}, chat_id: {chat_id}")
+            except Exception as e:
+                logger.warning(f"Error extracting typing context: {e}")
+            
             # Metadata now travels with LLMMessage objects, no need for original_context_data
-            llm_response_obj = llm_provider.complete(messages=messages, tools=aggregated_tools)
+            try:
+                llm_response_obj = llm_provider.complete(messages=messages, tools=aggregated_tools)
+                logger.debug(f"LLM completion successful, ending typing tracking")
+            except Exception as llm_error:
+                logger.error(f"LLM completion failed: {llm_error}", exc_info=True)
+                # End typing tracking on error
+                if completion_id:
+                    self.end_completion_tracking(completion_id)
+                raise llm_error
+            finally:
+                # Always end typing tracking after LLM completion (success or failure)
+                if completion_id:
+                    self.end_completion_tracking(completion_id)
+                    completion_id = None  # Clear to prevent double cleanup in finally block
 
             if not llm_response_obj:
                 logger.warning(f"{self.agent_loop_name} ({self.id}): LLM returned no response. Aborting cycle.")
@@ -212,4 +261,8 @@ class SimpleRequestResponseLoopComponent(BaseAgentLoopComponent):
         except Exception as e:
             logger.error(f"{self.agent_loop_name} ({self.id}): Error during simple cycle: {e}", exc_info=True)
         finally:
+            # Clean up typing tracking if it was started and not already cleaned up
+            if completion_id:
+                logger.debug(f"Final cleanup: ending completion tracking for {completion_id}")
+                self.end_completion_tracking(completion_id)
             logger.info(f"{self.agent_loop_name} ({self.id}): Simple cycle with memory completed.")
