@@ -59,7 +59,6 @@ class SpaceRegistry:
         self._routing_map: Dict[str, str] = {}
         self.response_callback: Optional[Callable] = None
         self.space_observers: Dict[str, List[Callable]] = {}
-        self.activity_client: Optional[Any] = None
         
         # NEW: Storage integration for SpaceRegistry persistence
         self._storage: Optional[StorageInterface] = None
@@ -709,36 +708,8 @@ class SpaceRegistry:
             except Exception as e:
                 logger.error(f"Error propagating attention event to Shell: {e}")
     
-    def set_activity_client(self, activity_client) -> None:
-        """
-        Set the activity client for external communication.
-
-        Args:
-            activity_client: ActivityClient instance
-        """
-        self.activity_client = activity_client
-        logger.info("Activity client set in SpaceRegistry")
     
     
-    def send_typing_indicator(self, adapter_id: str, chat_id: str, is_typing: bool = True) -> bool:
-        """
-        Send a typing indicator to an external system.
-
-        Args:
-            adapter_id: ID of the adapter to send through
-            chat_id: ID of the chat/conversation
-            is_typing: Whether typing is active (True) or not (False)
-
-        Returns:
-            True if the indicator was sent successfully, False otherwise
-        """
-        if not self.activity_client:
-            logger.error("Cannot send typing indicator: No activity client set")
-            return False
-
-        logger.debug(f"Sending typing indicator ({is_typing}) for chat {chat_id} via adapter {adapter_id}")
-
-        return self.activity_client.send_typing_indicator(adapter_id, chat_id, is_typing)
     
     
 

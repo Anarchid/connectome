@@ -31,6 +31,7 @@ from .components.agent_loop import BaseAgentLoopComponent, SimpleRequestResponse
 from .components.agent_loop.heartbeat_component import HeartbeatComponent
 from .components.agent_loop.decider_component import ActivationDeciderComponent
 from .components.agent_loop.interrupt_decider_component import InterruptDeciderComponent
+from .components.activity_status_component import ActivityStatusComponent
 
 # Type checking imports
 from typing import TYPE_CHECKING
@@ -199,15 +200,23 @@ class InnerSpace(Space):
             logger.error(f"Failed to add HeartbeatComponent to InnerSpace {self.id}")
         else:
             logger.info(f"HeartbeatComponent successfully added to InnerSpace {self.id}")
+
+        # Add ActivityStatusComponent for typing indicators and activity status
+        self._activity_status = self.add_component(ActivityStatusComponent)
+        if not self._activity_status:
+            logger.error(f"Failed to add ActivityStatusComponent to InnerSpace {self.id}")
+        else:
+            logger.info(f"ActivityStatusComponent successfully added to InnerSpace {self.id}")
         
         # Add any additional requested components
         if additional_components:
             for component_type in additional_components:
-                if component_type in [ToolProviderComponent, ElementFactoryComponent, 
+                if component_type in [ToolProviderComponent, ElementFactoryComponent,
                                      UplinkManagerComponent, # NEWLY ADDED
                                      VEILFacetCompressionEngine, # NEW: Add VEILFacet compression engine to skip list
                                      # GlobalAttentionComponent, # REMOVED
-                                     FacetAwareHUDComponent # NEW: Add FacetAware HUD to skip list
+                                     FacetAwareHUDComponent, # NEW: Add FacetAware HUD to skip list
+                                     ActivityStatusComponent, # Add ActivityStatusComponent to skip list
                                      # ContextManagerComponent # REMOVED
                                      ]:
                     # Skip components that we already added

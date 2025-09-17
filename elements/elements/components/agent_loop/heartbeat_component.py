@@ -5,7 +5,6 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from ..base_component import Component
 from elements.component_registry import register_component
-from elements.space_registry import get_space_registry
 
 logger = logging.getLogger(__name__)
 
@@ -215,11 +214,7 @@ class HeartbeatComponent(Component):
 				self._last_typing_sent.clear()
 				return
 			
-			# Get the space registry for sending typing indicators
-			space_registry = get_space_registry()
-			if not space_registry:
-				logger.debug("No space registry available for typing indicators")
-				return
+			# We'll get the ActivityStatusComponent for each chat as needed
 			
 			# Process each active completion
 			current_time = time.time()
@@ -233,16 +228,25 @@ class HeartbeatComponent(Component):
 				# Check if we need to send/refresh typing for this chat
 				last_sent = self._last_typing_sent.get(chat_id, 0)
 				time_since_last = current_time - last_sent
-				
+
 				if time_since_last >= self._typing_refresh_interval:
-					# Send typing indicator
+					# Send typing indicator through ActivityStatusComponent
 					try:
-						success = space_registry.send_typing_indicator(adapter_id, chat_id, is_typing=True)
-						if success:
-							self._last_typing_sent[chat_id] = current_time
-							logger.debug(f"Sent typing indicator for {adapter_id}/{chat_id} (completion {completion_id[:8]})")
+						# Get ActivityStatusComponent from parent inner space
+						parent_inner_space = getattr(self.owner, 'get_parent_object', lambda: None)()
+						if parent_inner_space:
+							activity_status_component = parent_inner_space.get_component_by_type("ActivityStatusComponent")
+							if activity_status_component:
+								result = await activity_status_component.handle_typing_indicator(adapter_id, chat_id, is_typing=True)
+								if result.get("success"):
+									self._last_typing_sent[chat_id] = current_time
+									logger.debug(f"Sent typing indicator for {adapter_id}/{chat_id} (completion {completion_id[:8]})")
+								else:
+									logger.debug(f"Failed to send typing indicator for {adapter_id}/{chat_id}: {result.get('error')}")
+							else:
+								logger.debug(f"No ActivityStatusComponent found for typing indicator")
 						else:
-							logger.debug(f"Failed to send typing indicator for {adapter_id}/{chat_id}")
+							logger.debug(f"Could not get parent inner space for typing indicator")
 					except Exception as e:
 						logger.warning(f"Error sending typing indicator: {e}")
 			

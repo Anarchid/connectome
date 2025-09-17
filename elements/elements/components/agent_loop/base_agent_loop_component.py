@@ -172,26 +172,29 @@ class BaseAgentLoopComponent(Component):
             
             # NEW: Send initial typing indicator when activation starts
             try:
-                from elements.space_registry import get_space_registry
-                space_registry = get_space_registry()
-                if space_registry and focus_element_id:
+                if focus_element_id:
                     # Try to extract adapter and chat IDs for immediate typing
                     element = self.parent_inner_space.get_element_by_id(focus_element_id)
                     if element:
                         chat_id = getattr(element, 'external_conversation_id', None) or \
                                  getattr(element, 'conversation_id', None)
                         adapter_id = getattr(element, 'adapter_id', None)
-                        
+
                         if not adapter_id or not chat_id:
                             parent_space = getattr(element, 'get_parent_object', lambda: None)()
                             if parent_space:
                                 chat_id = chat_id or getattr(parent_space, 'external_conversation_id', None)
                                 adapter_id = adapter_id or getattr(parent_space, 'adapter_id', None)
-                        
+
                         if adapter_id and chat_id:
-                            # Send initial typing indicator
-                            space_registry.send_typing_indicator(adapter_id, chat_id, is_typing=True)
-                            logger.debug(f"[{self.agent_loop_name}] Sent initial typing indicator for {adapter_id}/{chat_id}")
+                            # Get ActivityStatusComponent from inner space
+                            activity_status_component = self.parent_inner_space.get_component_by_type("ActivityStatusComponent")
+                            if activity_status_component:
+                                # Send initial typing indicator through component
+                                await activity_status_component.handle_typing_indicator(adapter_id, chat_id, is_typing=True)
+                                logger.debug(f"[{self.agent_loop_name}] Sent initial typing indicator for {adapter_id}/{chat_id}")
+                            else:
+                                logger.debug(f"[{self.agent_loop_name}] No ActivityStatusComponent found for typing indicator")
             except Exception as e:
                 logger.debug(f"[{self.agent_loop_name}] Could not send initial typing indicator: {e}")
 

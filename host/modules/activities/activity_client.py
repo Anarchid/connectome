@@ -1246,38 +1246,4 @@ class ActivityClient:
 
     # NEW: Methods for SpaceRegistry socket client compatibility
 
-    def send_typing_indicator(self, adapter_id: str, chat_id: str, is_typing: bool = True) -> bool:
-        """
-        Send a typing indicator to an external adapter.
-
-        Args:
-            adapter_id: ID of the adapter to send through
-            chat_id: ID of the chat/conversation
-            is_typing: Whether typing is active (True) or not (False)
-
-        Returns:
-            True if the indicator was queued successfully, False otherwise
-        """
-        try:
-            # Create typing indicator action payload
-            typing_payload = {
-                "action_type": "send_typing_indicator",
-                "adapter_id": adapter_id,
-                "conversation_id": chat_id,
-                "is_typing": is_typing,
-                "internal_request_id": f"typing_{adapter_id}_{chat_id}_{int(time.time())}"
-            }
-
-            action = {
-                "payload": typing_payload
-            }
-
-            # Queue the action via handle_outgoing_action
-            asyncio.create_task(self.handle_outgoing_action(action))
-            logger.debug(f"Queued typing indicator ({is_typing}) for {adapter_id}/{chat_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error sending typing indicator via ActivityClient: {e}")
-            return False
 
