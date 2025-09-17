@@ -719,39 +719,6 @@ class SpaceRegistry:
         self.activity_client = activity_client
         logger.info("Activity client set in SpaceRegistry")
     
-    def send_external_message(self, message_data: Dict[str, Any]) -> bool:
-        """
-        Send a message to an external system.
-
-        This method serves as a central point for all outgoing messages,
-        routing them through the activity client.
-
-        Args:
-            message_data: Message data to send, with format:
-                {
-                    "event_type": "send_message",  # Or other event types
-                    "data": {
-                        "conversation_id": "C123",
-                        "text": "Hello world",
-                        # Other event-specific fields
-                    },
-                    "adapter_id": "adapter_id"
-                }
-
-        Returns:
-            True if the message was sent successfully, False otherwise
-        """
-        if not self.activity_client:
-            logger.error("Cannot send external message: No activity client set")
-            return False
-
-        # Log the outgoing message
-        event_type = message_data.get("event_type", "unknown")
-        adapter_id = message_data.get("adapter_id", "unknown")
-        logger.debug(f"Sending external {event_type} message via adapter {adapter_id}")
-
-        # Send through the activity client
-        return self.activity_client.send_message(message_data)
     
     def send_typing_indicator(self, adapter_id: str, chat_id: str, is_typing: bool = True) -> bool:
         """
@@ -773,54 +740,7 @@ class SpaceRegistry:
 
         return self.activity_client.send_typing_indicator(adapter_id, chat_id, is_typing)
     
-    def send_error(self, adapter_id: str, chat_id: str, error_message: str) -> bool:
-        """
-        Send an error message to an external system.
-
-        Args:
-            adapter_id: ID of the adapter to send through
-            chat_id: ID of the chat/conversation
-            error_message: Error message to send
-
-        Returns:
-            True if the error was sent successfully, False otherwise
-        """
-        if not self.activity_client:
-            logger.error("Cannot send error message: No activity client set")
-            return False
-
-        logger.debug(f"Sending error message for chat {chat_id} via adapter {adapter_id}: {error_message}")
-
-        return self.activity_client.send_error(adapter_id, chat_id, error_message)
     
-    def propagate_message(self, message: Dict[str, Any], timeline_context: Dict[str, Any]) -> bool:
-        """
-        Propagate a message from an element to the activity layer.
-        
-        Args:
-            message: Message to propagate
-            timeline_context: Timeline context for this message
-            
-        Returns:
-            True if propagation was successful, False otherwise
-        """
-        # Only propagate from primary timeline
-        if not timeline_context.get("is_primary", False):
-            logger.info(f"Not propagating message from non-primary timeline: {timeline_context.get('timeline_id')}")
-            return False
-            
-        # Send to activity client if available
-        if self.activity_client:
-            try:
-                self.activity_client.send_message(message)
-                logger.info("Propagated message to activity layer")
-                return True
-            except Exception as e:
-                logger.error(f"Error propagating message: {e}")
-                return False
-        else:
-            logger.warning("No activity client available for message propagation")
-            return False
 
     def get_or_create_shared_space(self, 
                                    identifier: str, 
