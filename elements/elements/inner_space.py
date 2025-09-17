@@ -264,6 +264,7 @@ class InnerSpace(Space):
         self._propagate_callback_to_component(ElementFactoryComponent, callback)
         self._propagate_callback_to_component(UplinkManagerComponent, callback) # NEWLY ADDED
         self._propagate_callback_to_component(BaseAgentLoopComponent, callback)
+        self._propagate_callback_to_component(ActivityStatusComponent, callback) # Add ActivityStatusComponent
         # Add other components as needed
     
     def _propagate_callback_to_component(self, component_type: Type[Component], callback: 'OutgoingActionCallback') -> None:
