@@ -13,6 +13,8 @@ from enum import Enum
 from typing import Dict, Any, Optional, Callable, List, Set
 from collections import OrderedDict
 
+from opentelemetry import trace
+
 
 class MessageDirection(Enum):
     OUTBOUND = "outbound"
@@ -111,7 +113,10 @@ class FIXProtocol:
         
         # Logger
         self.logger = logging.getLogger(f"FIXProtocol.{node_id}")
-        
+
+        # Tracer
+        self.tracer = trace.get_tracer(f"FIXProtocol.{node_id}")
+
         # Start cleanup task
         self.cleanup_task = asyncio.create_task(self._cleanup_old_messages())
         
@@ -122,46 +127,63 @@ class FIXProtocol:
             self.logger.info(f"Created new peer state for {peer_id}")
         return self.peer_states[peer_id]
         
-    async def send_message(self, 
+    async def send_message(self,
                           message_type: str,
                           body: Dict[str, Any],
                           peer_id: Optional[str] = None,
                           requires_ack: bool = False) -> int:
         """
         Send a message with protocol headers.
-        
+
         Args:
             message_type: Type of message (e.g., "bot_request", "bot_response")
             body: Message payload
             peer_id: Target peer (for directed messages)
             requires_ack: Whether explicit acknowledgment is required
-            
+
         Returns:
             Sequence number assigned to the message
         """
-        self.logger.info(f"BEFORE increment: outbound_sequence={self.outbound_sequence}")
-        self.outbound_sequence += 1
-        self.logger.info(f"AFTER increment: outbound_sequence={self.outbound_sequence}")
-        
-        # Create protocol message
-        message = ProtocolMessage(
-            sequence=self.outbound_sequence,
-            timestamp=time.time(),
-            message_type=message_type,
-            sender=self.node_id,
-            body=body,
-            requires_ack=requires_ack
-        )
-        
-        # Store for retransmission
-        self.message_storage[self.outbound_sequence] = message
-        
-        # Send via transport
-        await self.send_callback('protocol_message', message.to_dict())
-        
-        self.logger.debug(f"Sent {message_type} with seq={self.outbound_sequence}")
-        
-        return self.outbound_sequence
+        with self.tracer.start_as_current_span("fix_protocol.send_message") as span:
+            span.set_attribute("message_type", message_type)
+            span.set_attribute("node_id", self.node_id)
+            span.set_attribute("requires_ack", requires_ack)
+            if peer_id:
+                span.set_attribute("peer_id", peer_id)
+
+            self.logger.info(f"BEFORE increment: outbound_sequence={self.outbound_sequence}")
+            span.add_event("incrementing_sequence")
+            self.outbound_sequence += 1
+            span.set_attribute("sequence_number", self.outbound_sequence)
+            self.logger.info(f"AFTER increment: outbound_sequence={self.outbound_sequence}")
+
+            # Create protocol message
+            span.add_event("creating_protocol_message")
+            message_timestamp = time.time()
+            span.set_attribute("message_timestamp", message_timestamp)
+
+            message = ProtocolMessage(
+                sequence=self.outbound_sequence,
+                timestamp=message_timestamp,
+                message_type=message_type,
+                sender=self.node_id,
+                body=body,
+                requires_ack=requires_ack
+            )
+
+            # Store for retransmission
+            span.add_event("storing_for_retransmission")
+            self.message_storage[self.outbound_sequence] = message
+
+            # Send via transport
+            span.add_event("sending_via_transport")
+            await self.send_callback('protocol_message', message.to_dict())
+            span.add_event("transport_send_completed")
+
+            self.logger.debug(f"Sent {message_type} with seq={self.outbound_sequence}")
+
+            span.set_status(trace.Status(trace.StatusCode.OK))
+            return self.outbound_sequence
         
     async def handle_incoming_message(self, peer_id: str, data: Dict[str, Any]) -> None:
         """

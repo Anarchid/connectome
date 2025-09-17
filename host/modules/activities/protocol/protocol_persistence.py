@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional, List
 from dataclasses import asdict
 import logging
 
+from opentelemetry import trace
+
 from .fix_protocol import ProtocolMessage, ProtocolState
 
 
@@ -276,6 +278,7 @@ class PersistentFIXProtocol:
         self.protocol = protocol
         self.persistence = persistence
         self.logger = logging.getLogger(f"PersistentProtocol.{protocol.node_id}")
+        self.tracer = trace.get_tracer(f"PersistentProtocol.{protocol.node_id}")
         
     async def initialize(self):
         """Load persisted state on startup"""
@@ -324,16 +327,33 @@ class PersistentFIXProtocol:
         
     async def send_message(self, *args, **kwargs) -> int:
         """Send message and persist"""
-        sequence = await self.protocol.send_message(*args, **kwargs)
-        
-        # Persist the message
-        message = self.protocol.message_storage[sequence]
-        await self.persistence.save_message(self.protocol.node_id, sequence, message)
-        
-        # Update state
-        await self.save_state()
-        
-        return sequence
+        with self.tracer.start_as_current_span("persistent_protocol.send_message") as span:
+            span.set_attribute("node_id", self.protocol.node_id)
+
+            # Extract message_type if available for better tracing
+            if len(args) > 0:
+                span.set_attribute("message_type", args[0])
+            elif 'message_type' in kwargs:
+                span.set_attribute("message_type", kwargs['message_type'])
+
+            span.add_event("calling_protocol_send_message")
+            sequence = await self.protocol.send_message(*args, **kwargs)
+            span.set_attribute("sequence_number", sequence)
+            span.add_event("protocol_send_completed")
+
+            # Persist the message
+            span.add_event("persisting_message")
+            message = self.protocol.message_storage[sequence]
+            await self.persistence.save_message(self.protocol.node_id, sequence, message)
+            span.add_event("message_persisted")
+
+            # Update state
+            span.add_event("saving_state")
+            await self.save_state()
+            span.add_event("state_saved")
+
+            span.set_status(trace.Status(trace.StatusCode.OK))
+            return sequence
         
     async def handle_incoming_message(self, peer_id: str, data: Dict[str, Any]) -> None:
         """Handle incoming message and update persistent state"""
