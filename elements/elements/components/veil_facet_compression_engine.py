@@ -2102,7 +2102,8 @@ class VEILFacetCompressionEngine(Component):
     async def _build_compressed_context_for_chunk(self,
                                                  container_id: str,
                                                  chunk_structure: Dict[str, Any],
-                                                 target_chunk_index: int) -> VEILFacetCache:
+                                                 target_chunk_index: int,
+                                                 full_facet_cache: VEILFacetCache) -> VEILFacetCache:
         """
         Build compressed context for memory creation - rolling window approach.
 
@@ -2207,7 +2208,7 @@ class VEILFacetCompressionEngine(Component):
 
             # Build compressed context for this specific chunk
             compressed_cache = await self._build_compressed_context_for_chunk(
-                container_id, chunk_structure, chunk_index
+                container_id, chunk_structure, chunk_index, full_facet_cache
             )
 
             # Get turn-based compression context using compressed cache
@@ -2326,7 +2327,7 @@ class VEILFacetCompressionEngine(Component):
                 "created_at": datetime.now(),
                 "is_complete": True,
                 "source_n_chunk_index": chunk_index,
-                "replaced_facet_count": len(n_chunk.get("facet_ids", []))
+                "replaced_facet_count": len(replaced_ids)
             }
 
             # Add to M-chunks
