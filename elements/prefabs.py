@@ -28,6 +28,7 @@ Defines standard configurations for creating common elements.
 PREFABS = {
     "simple_scratchpad": {
         "description": "A basic element for storing text notes.",
+        "user_facing_description": "I can create a scratchpad for storing temporary notes, ideas, and information during our conversation",
         "element_constructor_arg_keys": ["name", "description"],
         "components": [
             {"type": "NoteStorageComponent"}, # State
@@ -35,7 +36,16 @@ PREFABS = {
             {"type": "ScratchpadActionHandler"}, # Logic/Tools
             {"type": "ScratchpadVeilProducer"} # VEIL representation
         ],
-        "required_configs_for_element": [] 
+        "required_configs_for_element": [],
+        "capabilities": [
+            "add_note_to_scratchpad - Add text notes for later reference",
+            "get_notes_from_scratchpad - Retrieve all stored notes", 
+            "clear_all_scratchpad_notes - Clear all notes when no longer needed"
+        ],
+        "example_config": {
+            "name": "Research Notes",
+            "description": "Scratchpad for collecting research findings"
+        }
     },
 
     "standard_uplink_proxy": {
@@ -86,4 +96,31 @@ PREFABS = {
             "conversation_name": "conversation_name"
         }
     },
+    
+    # Example of a custom element template that could be added
+    # Uncomment and modify as needed for your specific use cases
+    # "task_tracker": {
+    #     "description": "An element for tracking tasks and TODOs",
+    #     "user_facing_description": "I can create a task tracker to help manage action items, TODOs, and track progress",
+    #     "element_constructor_arg_keys": ["name", "description"],
+    #     "components": [
+    #         {"type": "TaskStorageComponent"},      # Stores tasks
+    #         {"type": "ToolProviderComponent"},     # Standard tool management
+    #         {"type": "TaskActionHandler"},         # Task management tools
+    #         {"type": "TaskVeilProducer"}          # Visual representation
+    #     ],
+    #     "required_configs_for_element": ["name"],
+    #     "capabilities": [
+    #         "add_task - Create a new task with description and priority",
+    #         "list_tasks - View all tasks or filter by status/priority",
+    #         "update_task_status - Mark tasks as in-progress or completed",
+    #         "remove_task - Delete completed or cancelled tasks"
+    #     ],
+    #     "example_config": {
+    #         "name": "Project Tasks",
+    #         "description": "Task tracker for current project",
+    #         "max_tasks": 100,
+    #         "priority_levels": ["high", "medium", "low"]
+    #     }
+    # }
 } 

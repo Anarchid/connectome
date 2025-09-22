@@ -54,6 +54,8 @@ class ElementFactoryComponent(Component):
     def initialize(self, **kwargs) -> None:
         """Initializes the component."""
         from ..space import Space # Import here for type checking
+        from ..inner_space import InnerSpace # Import for type checking
+        from ..tool_provider import ToolProviderComponent, ToolParameter
         super().initialize(**kwargs)
 
         if not isinstance(self.owner, Space):
@@ -84,6 +86,11 @@ class ElementFactoryComponent(Component):
         _populate_element_class_lookup()
         if not COMPONENT_REGISTRY:
              logger.error("Component Registry is empty! ElementFactory cannot function. Was scan_and_load_components called?")
+
+        # Register factory tools if owner is InnerSpace
+        if isinstance(self.owner, InnerSpace):
+            self._register_factory_tools()
+            logger.info(f"ElementFactoryComponent registered tools for InnerSpace {self.owner.id}")
 
         logger.debug(f"ElementFactoryComponent initialized for Element {self.owner.id if self.owner else 'Unknown'}. Callback acquired: {'Yes' if self._outgoing_action_callback_for_created else 'No'}")
 
@@ -391,6 +398,275 @@ class ElementFactoryComponent(Component):
             error_msg = f"Failed to create element '{element_id}' in space '{owner_space.id}': {e}"
             logger.error(error_msg, exc_info=True)
             return { "success": False, "result": None, "error": error_msg }
+
+    def _register_factory_tools(self) -> None:
+        """
+        Register element factory tools with the owner's ToolProviderComponent.
+        
+        This enables agents to dynamically create elements during runtime.
+        """
+        from ..tool_provider import ToolProviderComponent, ToolParameter
+        
+        tool_provider = self.owner.get_component_by_type(ToolProviderComponent)
+        if not tool_provider:
+            logger.error(f"[{self.owner.id}/ElementFactoryComponent] ToolProviderComponent not found, cannot register factory tools")
+            return
+        
+        # Tool 1: List available element templates (prefabs)
+        tool_provider.register_tool_function(
+            name="list_element_templates",
+            description="List available element templates (prefabs) that can be created dynamically",
+            parameters_schema=[],
+            tool_func=self._tool_list_templates
+        )
+        
+        # Tool 2: Create element from template
+        create_params: List[ToolParameter] = [
+            {
+                "name": "template",
+                "type": "string",
+                "description": "The template/prefab name to use (from list_element_templates)",
+                "required": True
+            },
+            {
+                "name": "name",
+                "type": "string", 
+                "description": "A descriptive name for the new element",
+                "required": True
+            },
+            {
+                "name": "description",
+                "type": "string",
+                "description": "Optional description of the element's purpose",
+                "required": False
+            },
+            {
+                "name": "config",
+                "type": "object",
+                "description": "Optional additional configuration parameters specific to the template",
+                "required": False
+            }
+        ]
+        
+        tool_provider.register_tool_function(
+            name="create_element",
+            description="Create a new element from a template to extend capabilities",
+            parameters_schema=create_params,
+            tool_func=self._tool_create_element
+        )
+        
+        # Tool 3: List current elements
+        tool_provider.register_tool_function(
+            name="list_my_elements",
+            description="List all elements currently in your inner space with their available tools",
+            parameters_schema=[],
+            tool_func=self._tool_list_elements
+        )
+        
+        logger.info(f"[{self.owner.id}/ElementFactoryComponent] Registered 3 element management tools")
+    
+    async def _tool_list_templates(self) -> Dict[str, Any]:
+        """
+        Tool function to list available element templates.
+        
+        Returns detailed information about each prefab including required parameters.
+        """
+        try:
+            result = self.handle_list_available_prefabs()
+            
+            if result.get("success"):
+                # Enhance the response with more details
+                prefabs = result.get("result", {})
+                enhanced_info = []
+                
+                for prefab_name, description in prefabs.items():
+                    prefab_data = PREFABS.get(prefab_name, {})
+                    
+                    template_info = {
+                        "name": prefab_name,
+                        "description": description,
+                        "required_config": prefab_data.get("required_configs_for_element", []),
+                        "components": [comp.get("type") for comp in prefab_data.get("components", [])],
+                        "example_usage": f'create_element(template="{prefab_name}", name="My {prefab_name.replace("_", " ").title()}")'
+                    }
+                    
+                    # Add user-facing description if available
+                    if "user_facing_description" in prefab_data:
+                        template_info["capabilities"] = prefab_data["user_facing_description"]
+                    
+                    enhanced_info.append(template_info)
+                
+                return {
+                    "success": True,
+                    "result": enhanced_info,
+                    "error": None
+                }
+            else:
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error in list_element_templates tool: {e}", exc_info=True)
+            return {"success": False, "result": None, "error": str(e)}
+    
+    async def _tool_create_element(self, template: str, name: str, description: str = "", config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Tool function to create a new element from a template.
+        
+        Handles element creation and automatic activation emission.
+        """
+        try:
+            # Generate a unique element ID
+            import time
+            from ..inner_space import InnerSpace
+            
+            agent_id = ""
+            if isinstance(self.owner, InnerSpace) and hasattr(self.owner, 'agent_id'):
+                agent_id = self.owner.agent_id
+            
+            element_id = f"{template}_{agent_id}_{int(time.time() * 1000)}"
+            
+            # Prepare element configuration
+            element_config = {
+                "name": name,
+                "description": description or f"{name} created from {template} template"
+            }
+            
+            # Merge any additional config
+            if config:
+                element_config.update(config)
+            
+            # Create the element
+            result = self.handle_create_element_from_prefab(
+                prefab_name=template,
+                element_id=element_id,
+                element_config=element_config
+            )
+            
+            if result.get("success"):
+                new_element = result.get("element")
+                
+                # Emit activation to make the new element immediately available
+                if new_element and self.owner:
+                    await self._emit_element_activation(new_element)
+                
+                # Enhance result with tool information
+                if new_element:
+                    from ..tool_provider import ToolProviderComponent
+                    tool_provider = new_element.get_component_by_type(ToolProviderComponent)
+                    available_tools = []
+                    if tool_provider:
+                        available_tools = tool_provider.list_tools()
+                    
+                    result["result"] = {
+                        "element_id": element_id,
+                        "element_name": name,
+                        "template_used": template,
+                        "available_tools": available_tools,
+                        "message": f"Successfully created '{name}' with {len(available_tools)} tools"
+                    }
+                
+                return result
+            else:
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error in create_element tool: {e}", exc_info=True)
+            return {"success": False, "result": None, "error": str(e)}
+    
+    async def _tool_list_elements(self) -> Dict[str, Any]:
+        """
+        Tool function to list current elements in the space.
+        
+        Returns information about mounted elements and their capabilities.
+        """
+        try:
+            if not self._owner_space:
+                return {"success": False, "result": None, "error": "Owner space not available"}
+            
+            mounted_elements = self._owner_space.get_mounted_elements()
+            element_info = []
+            
+            for mount_id, element in mounted_elements.items():
+                # Get tool information
+                from ..tool_provider import ToolProviderComponent
+                tool_provider = element.get_component_by_type(ToolProviderComponent)
+                available_tools = []
+                if tool_provider:
+                    available_tools = tool_provider.list_tools()
+                
+                info = {
+                    "element_id": element.id,
+                    "mount_id": mount_id,
+                    "name": element.name,
+                    "type": element.__class__.__name__,
+                    "description": getattr(element, 'description', ''),
+                    "tool_count": len(available_tools),
+                    "tools": available_tools
+                }
+                
+                element_info.append(info)
+            
+            # Sort by name for consistent output
+            element_info.sort(key=lambda x: x.get("name", ""))
+            
+            return {
+                "success": True,
+                "result": element_info,
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in list_my_elements tool: {e}", exc_info=True)
+            return {"success": False, "result": None, "error": str(e)}
+    
+    async def _emit_element_activation(self, element: BaseElement) -> None:
+        """
+        Emit an activation event for a newly created element.
+        
+        This ensures the agent loop will process the new element and its tools.
+        """
+        try:
+            if not self.owner or not hasattr(self.owner, 'receive_event'):
+                logger.warning(f"Cannot emit activation: owner not event-capable")
+                return
+            
+            # Build activation event similar to MessageListComponent pattern
+            activation_event = {
+                "event_type": "activation_call",
+                "event_id": f"factory_activation_{element.id}_{int(time.time() * 1000)}",
+                "source_element_id": element.id,
+                "target_element_id": self.owner.id,  # Target is the InnerSpace
+                "is_replayable": False,  # Activation calls are not replayable
+                "payload": {
+                    "reason": "element_created",
+                    "triggering_event_type": "element_created_from_prefab",
+                    "focus_context": {
+                        "focus_element_id": element.id,
+                        "focus_element_type": element.__class__.__name__,
+                        "focus_element_name": element.name,
+                        "element_creation": True,
+                        "template_used": "dynamic"
+                    },
+                    "metadata": {
+                        "factory_component_id": self.id,
+                        "created_element_id": element.id,
+                        "created_element_name": element.name
+                    }
+                }
+            }
+            
+            # Create timeline context
+            timeline_context = {
+                "source": "ElementFactoryComponent",
+                "timestamp": time.time()
+            }
+            
+            # Emit the activation
+            self.owner.receive_event(activation_event, timeline_context)
+            logger.info(f"[{self.owner.id}/ElementFactoryComponent] Emitted activation for newly created element '{element.name}' ({element.id})")
+            
+        except Exception as e:
+            logger.error(f"Error emitting element activation: {e}", exc_info=True)
 
     # TODO: Add handle_delete_element ? (Requires careful implementation regarding ownership and cleanup)
     # def handle_delete_element(self, element_id_to_delete: str) -> Dict[str, Any]: ...
