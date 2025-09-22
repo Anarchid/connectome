@@ -56,6 +56,7 @@ class AgentConfig(BaseSettings):
     # Note: Handling lists of agents via env vars is complex. Usually loaded from JSON/YAML.
     # We'll keep the structure but note the loading challenge.
     model_config = SettingsConfigDict(env_prefix=f'{ENV_PREFIX}AGENT_') # Prefix for individual vars if needed
+    startup_elements: List[Dict[str, Any]] = Field(default_factory=list, description="List of startup elements for the agent")
 
 class HostSettings(BaseSettings):
     """Main configuration settings loaded from environment variables."""

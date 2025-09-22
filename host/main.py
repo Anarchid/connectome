@@ -223,6 +223,12 @@ async def amain():
             
             # Create InnerSpace for this agent directly
             logger.info(f"Creating InnerSpace for agent '{agent_config.name}' ({agent_config.agent_id})")
+            
+            # Get startup elements if configured
+            startup_elements = getattr(agent_config, 'startup_elements', None)
+            if startup_elements:
+                logger.info(f"Agent '{agent_config.name}' has {len(startup_elements)} startup elements configured")
+            
             inner_space = InnerSpace(
                 element_id=f"{agent_config.agent_id}_inner_space",
                 name=f"{agent_config.name}'s Mind", 
@@ -233,7 +239,8 @@ async def amain():
                 llm_provider=llm_provider,
                 agent_loop_component_type=agent_loop_component_class,
                 outgoing_action_callback=event_loop.get_outgoing_action_callback(),
-                agent_purpose=agent_config.description
+                agent_purpose=agent_config.description,
+                startup_elements=startup_elements
             )
             
             # Register the InnerSpace with SpaceRegistry
@@ -243,7 +250,7 @@ async def amain():
             logger.info(f"✓ Agent '{agent_config.name}' ({agent_config.agent_id}) InnerSpace created and registered successfully")
                 
         except Exception as e:
-            logger.exception(f"Error processing agent config {agent_config.agent_id}: {e}")
+            logger.error(f"Error processing agent config {agent_config.agent_id}: {e}")
     
     if agents_processed == 0:
         logger.error("No agents were successfully configured. Check your CONNECTOME_AGENTS_JSON configuration.")

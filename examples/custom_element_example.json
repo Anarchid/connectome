@@ -1,0 +1,105 @@
+{
+  "example_custom_element_configuration": {
+    "description": "Example configuration showing how to add a custom element to an agent",
+    "agent_config": {
+      "agent_id": "agent_with_custom_element",
+      "name": "Custom Element Demo Agent",
+      "description": "An agent demonstrating custom element integration",
+      "agent_loop_component_type_name": "ToolTextParsingLoopComponent",
+      "platform_aliases": {
+        "zulip_adapter": "Custom Bot",
+        "discord_adapter": "CustomBot"
+      },
+      "handles_direct_messages_from_adapter_ids": ["zulip_adapter", "discord_adapter"],
+      "startup_elements": [
+        {
+          "prefab": "simple_scratchpad",
+          "element_id": "scratchpad_{agent_id}",
+          "element_config": {
+            "name": "Agent Scratchpad",
+            "description": "Default scratchpad for agent {agent_name}"
+          },
+          "enabled_by_default": true
+        },
+        {
+          "prefab": "your_element_type",
+          "element_id": "custom_element_{agent_id}",
+          "element_config": {
+            "name": "Custom Storage for {agent_name}",
+            "description": "A custom element providing specialized storage functionality",
+            "custom_attribute": "example_value",
+            "max_items": 100,
+            "auto_backup": true
+          },
+          "enabled_by_default": true
+        }
+      ]
+    },
+    
+    "notes": {
+      "template_variables": [
+        "{agent_id} - Replaced with the agent's ID",
+        "{agent_name} - Replaced with the agent's name",
+        "{agent_description} - Replaced with the agent's description"
+      ],
+      "custom_attributes": "Any attributes in element_config can be accessed by components through self.owner.attribute_name",
+      "prefab_reference": "The 'prefab' field must match a key in elements/prefabs.py PREFABS dictionary"
+    }
+  },
+  
+  "example_prefab_definition": {
+    "location": "elements/prefabs.py",
+    "code_snippet": {
+      "your_element_type": {
+        "description": "A custom element for specialized data storage with versioning",
+        "element_constructor_arg_keys": ["name", "description"],
+        "components": [
+          {"type": "YourStateComponent", "config": {"version": "1.0"}},
+          {"type": "ToolProviderComponent"},
+          {"type": "YourActionHandler", "config": {"enable_versioning": true}},
+          {"type": "YourVeilProducer"}
+        ],
+        "required_configs_for_element": ["name"],
+        "element_attributes_from_config": {
+          "max_items": "max_items",
+          "auto_backup": "auto_backup",
+          "custom_attribute": "custom_attribute"
+        }
+      }
+    }
+  },
+  
+  "tool_examples": {
+    "description": "Examples of tools that would be available after adding this element",
+    "tools": [
+      {
+        "name": "add_to_your_element",
+        "description": "Adds new content to your custom element",
+        "parameters": [
+          {"name": "content", "type": "string", "required": true},
+          {"name": "metadata", "type": "object", "required": false}
+        ],
+        "example_usage": "add_to_your_element(content='Important data to store', metadata={'category': 'research', 'priority': 'high'})"
+      },
+      {
+        "name": "search_your_element",
+        "description": "Search for items in your custom element",
+        "parameters": [
+          {"name": "query", "type": "string", "required": true},
+          {"name": "filters", "type": "object", "required": false}
+        ],
+        "example_usage": "search_your_element(query='research', filters={'priority': 'high'})"
+      },
+      {
+        "name": "export_from_your_element",
+        "description": "Export data from your custom element",
+        "parameters": [
+          {"name": "format", "type": "string", "required": true, "enum": ["json", "csv", "markdown"]},
+          {"name": "include_metadata", "type": "boolean", "required": false}
+        ],
+        "example_usage": "export_from_your_element(format='markdown', include_metadata=true)"
+      }
+    ]
+  }
+}
+

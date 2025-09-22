@@ -137,6 +137,7 @@ class SpaceVeilProducer(VeilProducer):
         
         This replaces the old delta operation system with VEILFacet operations, generating:
         - StatusFacet for space creation/updates
+        - AmbientFacet for space-level tools (InnerSpace tools)
         - Uses VEILFacet temporal positioning
         
         Returns:
@@ -151,6 +152,9 @@ class SpaceVeilProducer(VeilProducer):
         space_root_facet_id = f"{owner_id}_space_root"
         current_space_props = self._get_current_space_properties()
 
+        # Get enhanced tools for InnerSpace
+        enhanced_tools = self._get_enhanced_tools_for_space()
+
         # Check if space root facet exists in facet cache
         root_facet_exists = self.has_facet(space_root_facet_id)
         has_produced_flag = self._state.get('_has_produced_space_root_facet', False)
@@ -162,13 +166,17 @@ class SpaceVeilProducer(VeilProducer):
             else:
                 logger.info(f"[{owner_id}/{self.COMPONENT_TYPE}] Generating initial add_facet for Space root '{space_root_facet_id}'")
 
+            # Include enhanced tools in space root state
+            space_root_state = current_space_props.copy()
+            space_root_state["available_tools"] = enhanced_tools
+
             # Create space root as StatusFacet
             space_root_facet = StatusFacet(
                 facet_id=space_root_facet_id,
                 veil_timestamp=ConnectomeEpoch.get_veil_timestamp(),
                 owner_element_id=owner_id,
                 status_type="space_created",
-                current_state=current_space_props.copy()
+                current_state=space_root_state
             )
             
             facet_operations.append(FacetOperationBuilder.add_facet(space_root_facet))
@@ -177,14 +185,24 @@ class SpaceVeilProducer(VeilProducer):
         else:
             # Root exists in facet cache, check for property updates
             last_space_props = self._state.get('_last_space_properties', {})
-            if current_space_props != last_space_props:
+            current_space_props_with_tools = current_space_props.copy()
+            current_space_props_with_tools["available_tools"] = enhanced_tools
+            
+            if current_space_props_with_tools != last_space_props:
                 logger.info(f"[{owner_id}/{self.COMPONENT_TYPE}] Generating update_facet for Space root properties")
                 
                 update_operation = FacetOperationBuilder.update_facet(
                     space_root_facet_id,
-                    {"current_state": current_space_props.copy()}
+                    {"current_state": current_space_props_with_tools}
                 )
                 facet_operations.append(update_operation)
+
+        # Generate tool availability ambient facet for InnerSpace tools
+        if self._should_emit_space_tools_ambient():
+            tools_ambient_facet = self._create_space_tools_ambient_facet()
+            if tools_ambient_facet:
+                facet_operations.append(FacetOperationBuilder.add_facet(tools_ambient_facet))
+                logger.debug(f"[{owner_id}/{self.COMPONENT_TYPE}] Generated space tools ambient facet")
 
         # Update state after generating operations
         if not has_produced_flag and any(
@@ -194,7 +212,10 @@ class SpaceVeilProducer(VeilProducer):
         ):
             self._state['_has_produced_space_root_facet'] = True
 
-        self._state['_last_space_properties'] = copy.deepcopy(current_space_props)
+        # Store props with tools for comparison
+        current_props_with_tools = current_space_props.copy()
+        current_props_with_tools["available_tools"] = enhanced_tools
+        self._state['_last_space_properties'] = copy.deepcopy(current_props_with_tools)
 
         if facet_operations:
             logger.info(f"[{owner_id}/{self.COMPONENT_TYPE}] Calculated {len(facet_operations)} space facet operations")
@@ -474,3 +495,70 @@ class SpaceVeilProducer(VeilProducer):
             )
             
             return bool(response_id)
+    
+    def _get_enhanced_tools_for_space(self) -> List[Dict[str, Any]]:
+        """
+        Get enhanced tool definitions for InnerSpace-level tools.
+        
+        Returns rich tool information for space-level capabilities.
+        """
+        from ..tool_provider import ToolProviderComponent
+        
+        if not self.owner or not hasattr(self.owner, 'get_tool_provider'):
+            return []
+        
+        tool_provider = self.owner.get_tool_provider()
+        if tool_provider:
+            return tool_provider.get_enhanced_tool_definitions()
+        return []
+    
+    def _should_emit_space_tools_ambient(self) -> bool:
+        """
+        Determine whether to emit tools ambient facet for space-level tools.
+        
+        Returns:
+            True if space has tools that should be exposed
+        """
+        enhanced_tools = self._get_enhanced_tools_for_space()
+        return bool(enhanced_tools)
+    
+    def _create_space_tools_ambient_facet(self) -> Optional[AmbientFacet]:
+        """
+        Create enhanced AmbientFacet for space-level tools with structured data.
+        
+        Returns:
+            AmbientFacet with structured tool data for HUD consolidation
+        """
+        enhanced_tools = self._get_enhanced_tools_for_space()
+        if not enhanced_tools:
+            return None
+        
+        # Create structured content for space tools
+        structured_content = {
+            "tools": enhanced_tools,
+            "element_context": {
+                "element_id": self.owner.id,
+                "element_name": self.owner.name,
+                "element_type": self.owner.__class__.__name__,
+                "is_inner_space": True
+            },
+            "tool_family": "space_management_tools"
+        }
+        
+        ambient_facet = AmbientFacet(
+            facet_id=f"{self.owner.id}_space_tools_ambient",
+            owner_element_id=self.owner.id,
+            ambient_type="space_management_tools",
+            content=structured_content,
+            trigger_threshold=1000  # Higher priority for space-level tools
+        )
+        
+        # Add additional properties for HUD processing
+        ambient_facet.properties.update({
+            "data_format": "structured",
+            "tools_count": len(enhanced_tools),
+            "element_type": "inner_space",
+            "tool_scope": "space_level"
+        })
+        
+        return ambient_facet
