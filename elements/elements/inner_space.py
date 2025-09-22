@@ -83,6 +83,7 @@ class InnerSpace(Space):
         outgoing_action_callback: Optional['OutgoingActionCallback'] = None,
         # space_registry: Optional['SpaceRegistry'] = None, # REMOVE PARAMETER
         additional_components: Optional[List[Type[Component]]] = None,
+        startup_elements: Optional[List[Dict[str, Any]]] = None,
         **kwargs
     ):
         """
@@ -99,6 +100,7 @@ class InnerSpace(Space):
             outgoing_action_callback: Callback function for sending actions to external systems
             # space_registry: Reference to the SpaceRegistry instance # REMOVE FROM DOCSTRING
             additional_components: Optional list of additional component types to add
+            startup_elements: Optional list of element configurations to create on startup
             **kwargs: Additional keyword arguments for Space initialization
         """
         # Initialize the base Space (adds ContainerComponent, TimelineComponent, and now ElementFactoryComponent)
@@ -111,6 +113,7 @@ class InnerSpace(Space):
         self.agent_name = agent_name
         self._llm_provider = llm_provider
         self.agent_description = agent_description
+        self._startup_elements = startup_elements or []  # Store startup elements configuration
         
         # NEW: Adapter tracking for mention-based activation
         self._adapter_mappings: Dict[str, Dict[str, str]] = {}  # {adapter_type: {adapter_name: adapter_id}}
@@ -147,7 +150,7 @@ class InnerSpace(Space):
             scratchpad_id = f"scratchpad_{self.agent_id}"
             logger.info(f"[{self.id}] Attempting to create default scratchpad element '{scratchpad_id}'.")
             scratchpad_config = {
-                "name": "Agent Scratchpad",
+                "name": "Default Agent Scratchpad",
                 "description": f"Default scratchpad for agent {self.agent_name}"
             }
             creation_result = self._element_factory.handle_create_element_from_prefab(
@@ -160,6 +163,11 @@ class InnerSpace(Space):
             else:
                 error_msg = creation_result.get("error", "Unknown error") if creation_result else "Factory returned None"
                 logger.error(f"[{self.id}] Failed to create default scratchpad for agent {self.agent_id}: {error_msg}")
+            
+            # --- Process additional startup elements from configuration ---
+            if self._startup_elements:
+                logger.info(f"[{self.id}] Processing {len(self._startup_elements)} startup elements from configuration")
+                self._create_startup_elements()
             
         # Add UplinkManagerComponent
         self._uplink_manager = self.add_component(UplinkManagerComponent)
@@ -676,6 +684,124 @@ class InnerSpace(Space):
 
         # Call the super method with the augmented context
         return await super().execute_action_on_element(element_id, action_name, parameters, calling_context=final_calling_context)
+    
+    def _substitute_template_variables(self, template_str: str) -> str:
+        """
+        Substitute template variables in a string with actual values.
+        
+        Supported variables:
+        - {agent_id}: The agent's ID
+        - {agent_name}: The agent's name
+        - {agent_description}: The agent's description
+        
+        Args:
+            template_str: String containing template variables
+            
+        Returns:
+            String with substituted values
+        """
+        if not isinstance(template_str, str):
+            return template_str
+            
+        result = template_str
+        result = result.replace("{agent_id}", self.agent_id)
+        result = result.replace("{agent_name}", self.agent_name)
+        result = result.replace("{agent_description}", self.agent_description)
+        return result
+    
+    def _substitute_config_templates(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively substitute template variables in a configuration dictionary.
+        
+        Args:
+            config: Configuration dictionary potentially containing template variables
+            
+        Returns:
+            Configuration dictionary with substituted values
+        """
+        if not isinstance(config, dict):
+            return config
+            
+        result = {}
+        for key, value in config.items():
+            if isinstance(value, str):
+                result[key] = self._substitute_template_variables(value)
+            elif isinstance(value, dict):
+                result[key] = self._substitute_config_templates(value)
+            elif isinstance(value, list):
+                result[key] = [
+                    self._substitute_config_templates(item) if isinstance(item, dict) 
+                    else self._substitute_template_variables(item) if isinstance(item, str)
+                    else item
+                    for item in value
+                ]
+            else:
+                result[key] = value
+        return result
+    
+    def _create_startup_elements(self) -> None:
+        """
+        Create startup elements defined in the configuration.
+        
+        Processes the _startup_elements list and creates each element using the ElementFactoryComponent.
+        """
+        if not self._element_factory:
+            logger.error(f"[{self.id}] Cannot create startup elements: ElementFactoryComponent not available")
+            return
+            
+        for idx, element_spec in enumerate(self._startup_elements):
+            try:
+                # Validate element specification
+                if not isinstance(element_spec, dict):
+                    logger.warning(f"[{self.id}] Skipping invalid startup element spec at index {idx}: not a dictionary")
+                    continue
+                    
+                prefab = element_spec.get("prefab")
+                if not prefab:
+                    logger.warning(f"[{self.id}] Skipping startup element at index {idx}: missing 'prefab' field")
+                    continue
+                    
+                # Get element ID with template substitution
+                element_id_template = element_spec.get("element_id")
+                if not element_id_template:
+                    logger.warning(f"[{self.id}] Skipping startup element at index {idx}: missing 'element_id' field")
+                    continue
+                    
+                element_id = self._substitute_template_variables(element_id_template)
+                
+                # Substitute templates in element config
+                element_config = element_spec.get("element_config", {})
+                element_config = self._substitute_config_templates(element_config)
+                
+                # Substitute templates in component config overrides if present
+                component_config = element_spec.get("component_config_overrides", {})
+                component_config = self._substitute_config_templates(component_config)
+                
+                # Check if element should be created based on a condition
+                enabled = element_spec.get("enabled_by_default", True)
+                if not enabled:
+                    logger.info(f"[{self.id}] Skipping disabled startup element: {element_id}")
+                    continue
+                
+                logger.info(f"[{self.id}] Creating startup element '{element_id}' from prefab '{prefab}'")
+                
+                # Create the element using the factory
+                creation_result = self._element_factory.handle_create_element_from_prefab(
+                    prefab_name=prefab,
+                    element_id=element_id,
+                    element_config=element_config,
+                    component_config_overrides=component_config
+                )
+                
+                if creation_result and creation_result.get("success"):
+                    logger.info(f"[{self.id}] ✓ Successfully created startup element '{element_id}' from prefab '{prefab}'")
+                else:
+                    error_msg = creation_result.get("error", "Unknown error") if creation_result else "Factory returned None"
+                    logger.error(f"[{self.id}] ✗ Failed to create startup element '{element_id}': {error_msg}")
+                    
+            except Exception as e:
+                logger.error(f"[{self.id}] Error creating startup element at index {idx}: {e}", exc_info=True)
+                continue
     
     def register_adapter_mapping(self, adapter_type: str, adapter_name: str, adapter_id: str) -> None:
         """

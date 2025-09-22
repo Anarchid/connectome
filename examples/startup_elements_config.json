@@ -1,0 +1,154 @@
+{
+  "example_configurations": {
+    "simple_agent": {
+      "agent_id": "example_agent",
+      "name": "Example Agent",
+      "description": "An example agent showing startup elements configuration",
+      "agent_loop_component_type_name": "SimpleRequestResponseLoopComponent",
+      "startup_elements": []
+    },
+    
+    "agent_with_scratchpad_override": {
+      "agent_id": "note_taker",
+      "name": "Note Taker",
+      "description": "Agent with custom scratchpad configuration",
+      "agent_loop_component_type_name": "SimpleRequestResponseLoopComponent",
+      "startup_elements": [
+        {
+          "prefab": "simple_scratchpad",
+          "element_id": "scratchpad_{agent_id}",
+          "element_config": {
+            "name": "Agent Scratchpad",
+            "description": "Default scratchpad for agent {agent_name}"
+          },
+          "enabled_by_default": true,
+          "_comment": "This replaces the hard-coded scratchpad if we remove it from InnerSpace.__init__"
+        }
+      ]
+    },
+    
+    "agent_with_multiple_tools": {
+      "agent_id": "researcher",
+      "name": "Research Assistant",
+      "description": "Agent with multiple specialized storage elements",
+      "agent_loop_component_type_name": "ToolTextParsingLoopComponent",
+      "startup_elements": [
+        {
+          "prefab": "simple_scratchpad",
+          "element_id": "research_notes_{agent_id}",
+          "element_config": {
+            "name": "Research Notes",
+            "description": "Research findings and observations for {agent_name}"
+          }
+        },
+        {
+          "prefab": "simple_scratchpad",
+          "element_id": "task_list_{agent_id}",
+          "element_config": {
+            "name": "Task List",
+            "description": "Todo list and task tracking for {agent_name}"
+          }
+        },
+        {
+          "prefab": "simple_scratchpad",
+          "element_id": "references_{agent_id}",
+          "element_config": {
+            "name": "References",
+            "description": "Bookmarks and references for {agent_name}"
+          }
+        }
+      ]
+    },
+    
+    "agent_with_conditional_elements": {
+      "agent_id": "conditional_agent",
+      "name": "Conditional Agent",
+      "description": "Agent demonstrating conditional element creation",
+      "agent_loop_component_type_name": "SimpleRequestResponseLoopComponent",
+      "startup_elements": [
+        {
+          "prefab": "simple_scratchpad",
+          "element_id": "always_present_{agent_id}",
+          "element_config": {
+            "name": "Always Present",
+            "description": "This element is always created"
+          },
+          "enabled_by_default": true
+        },
+        {
+          "prefab": "simple_scratchpad", 
+          "element_id": "optional_element_{agent_id}",
+          "element_config": {
+            "name": "Optional Element",
+            "description": "This element is disabled by default"
+          },
+          "enabled_by_default": false
+        }
+      ]
+    },
+    
+    "future_example_with_custom_components": {
+      "_comment": "This shows how it could work with custom prefabs in the future",
+      "agent_id": "advanced_agent",
+      "name": "Advanced Agent",
+      "description": "Agent with hypothetical advanced elements",
+      "agent_loop_component_type_name": "ToolTextParsingLoopComponent",
+      "startup_elements": [
+        {
+          "prefab": "web_search_tool",
+          "element_id": "search_{agent_id}",
+          "element_config": {
+            "name": "Web Search",
+            "description": "Web search capability for {agent_name}",
+            "api_key": "{env:SEARCH_API_KEY}"
+          },
+          "component_config_overrides": {
+            "WebSearchComponent": {
+              "rate_limit": 100,
+              "timeout_seconds": 30
+            }
+          }
+        },
+        {
+          "prefab": "code_executor", 
+          "element_id": "sandbox_{agent_id}",
+          "element_config": {
+            "name": "Code Sandbox",
+            "description": "Sandboxed code execution for {agent_name}"
+          },
+          "component_config_overrides": {
+            "CodeExecutorComponent": {
+              "allowed_languages": ["python", "javascript"],
+              "max_execution_time": 60
+            }
+          }
+        }
+      ]
+    }
+  },
+  
+  "template_variables": {
+    "description": "Variables that can be used in element_id and element_config strings",
+    "available_variables": {
+      "{agent_id}": "The unique ID of the agent",
+      "{agent_name}": "The display name of the agent", 
+      "{agent_description}": "The description of the agent"
+    },
+    "future_variables": {
+      "{env:VARIABLE_NAME}": "Environment variable substitution (not yet implemented)",
+      "{timestamp}": "Current timestamp (not yet implemented)",
+      "{uuid}": "Generated UUID (not yet implemented)"
+    }
+  },
+  
+  "migration_notes": {
+    "current_state": "Default scratchpad is still hard-coded in InnerSpace.__init__",
+    "migration_path": [
+      "1. Keep hard-coded scratchpad as is (current implementation)",
+      "2. Make hard-coded scratchpad optional via configuration flag",
+      "3. Move scratchpad entirely to startup_elements configuration",
+      "4. Provide migration tool to update existing configurations"
+    ]
+  }
+}
+
