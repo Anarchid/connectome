@@ -59,7 +59,6 @@ class SpaceRegistry:
         self._routing_map: Dict[str, str] = {}
         self.response_callback: Optional[Callable] = None
         self.space_observers: Dict[str, List[Callable]] = {}
-        self.socket_client: Optional[Any] = None
         
         # NEW: Storage integration for SpaceRegistry persistence
         self._storage: Optional[StorageInterface] = None
@@ -709,118 +708,10 @@ class SpaceRegistry:
             except Exception as e:
                 logger.error(f"Error propagating attention event to Shell: {e}")
     
-    def set_socket_client(self, socket_client) -> None:
-        """
-        Set the socket client for external communication.
-        
-        Args:
-            socket_client: SocketIOClient instance
-        """
-        self.socket_client = socket_client
-        logger.info("Socket client set in SpaceRegistry")
     
-    def send_external_message(self, message_data: Dict[str, Any]) -> bool:
-        """
-        Send a message to an external system.
-        
-        This method serves as a central point for all outgoing messages,
-        routing them through the socket client.
-        
-        Args:
-            message_data: Message data to send, with format:
-                {
-                    "event_type": "send_message",  # Or other event types
-                    "data": {
-                        "conversation_id": "C123",
-                        "text": "Hello world",
-                        # Other event-specific fields
-                    },
-                    "adapter_id": "adapter_id"
-                }
-                
-        Returns:
-            True if the message was sent successfully, False otherwise
-        """
-        if not self.socket_client:
-            logger.error("Cannot send external message: No socket client set")
-            return False
-            
-        # Log the outgoing message
-        event_type = message_data.get("event_type", "unknown")
-        adapter_id = message_data.get("adapter_id", "unknown")
-        logger.debug(f"Sending external {event_type} message via adapter {adapter_id}")
-        
-        # Send through the socket client
-        return self.socket_client.send_message(message_data)
     
-    def send_typing_indicator(self, adapter_id: str, chat_id: str, is_typing: bool = True) -> bool:
-        """
-        Send a typing indicator to an external system.
-        
-        Args:
-            adapter_id: ID of the adapter to send through
-            chat_id: ID of the chat/conversation
-            is_typing: Whether typing is active (True) or not (False)
-            
-        Returns:
-            True if the indicator was sent successfully, False otherwise
-        """
-        if not self.socket_client:
-            logger.error("Cannot send typing indicator: No socket client set")
-            return False
-            
-        logger.debug(f"Sending typing indicator ({is_typing}) for chat {chat_id} via adapter {adapter_id}")
-        
-        return self.socket_client.send_typing_indicator(adapter_id, chat_id, is_typing)
     
-    def send_error(self, adapter_id: str, chat_id: str, error_message: str) -> bool:
-        """
-        Send an error message to an external system.
-        
-        Args:
-            adapter_id: ID of the adapter to send through
-            chat_id: ID of the chat/conversation
-            error_message: Error message to send
-            
-        Returns:
-            True if the error was sent successfully, False otherwise
-        """
-        if not self.socket_client:
-            logger.error("Cannot send error message: No socket client set")
-            return False
-            
-        logger.debug(f"Sending error message for chat {chat_id} via adapter {adapter_id}: {error_message}")
-        
-        return self.socket_client.send_error(adapter_id, chat_id, error_message)
     
-    def propagate_message(self, message: Dict[str, Any], timeline_context: Dict[str, Any]) -> bool:
-        """
-        Propagate a message from an element to the activity layer.
-        
-        Args:
-            message: Message to propagate
-            timeline_context: Timeline context for this message
-            
-        Returns:
-            True if propagation was successful, False otherwise
-        """
-        # Only propagate from primary timeline
-        if not timeline_context.get("is_primary", False):
-            logger.info(f"Not propagating message from non-primary timeline: {timeline_context.get('timeline_id')}")
-            return False
-            
-        # Send to socket client if available
-        if self.socket_client:
-            try:
-                self.socket_client.send_message(message)
-                logger.info("Propagated message to activity layer")
-                return True
-            except Exception as e:
-                logger.error(f"Error propagating message: {e}")
-                return False
-        else:
-            logger.warning("No socket client available for message propagation")
-            return False
 
     def get_or_create_shared_space(self, 
                                    identifier: str, 
@@ -898,3 +789,9 @@ class SpaceRegistry:
         except Exception as e:
             logger.error(f"Exception during SharedSpace creation for identifier '{identifier}': {e}", exc_info=True)
             return None
+
+
+# NEW: Global function to get the singleton instance
+def get_space_registry() -> Optional[SpaceRegistry]:
+    """Get the singleton SpaceRegistry instance, if it exists."""
+    return SpaceRegistry._instance

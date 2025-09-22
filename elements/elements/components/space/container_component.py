@@ -146,6 +146,29 @@ class ContainerComponent(BaseComponent):
         """Gets all mounted elements with their mount info (element and mount_type)."""
         return self._state['_mounted_elements'].copy()
 
+    def get_mounted_elements_info(self) -> Dict[str, Dict[str, Any]]:
+        """Gets metadata about mounted elements without returning element objects.
+
+        Returns a mapping of mount_id to a metadata dict containing:
+        - element_id: str
+        - element_type: str
+        - mount_type: str
+        """
+        info: Dict[str, Dict[str, Any]] = {}
+        for mount_id, entry in self._state['_mounted_elements'].items():
+            element: Optional['BaseElement'] = entry.get('element')
+            mount_type = entry.get('mount_type')
+            mount_type_name = (
+                mount_type.name if isinstance(mount_type, MountType)
+                else (str(mount_type) if mount_type is not None else 'unknown')
+            )
+            info[mount_id] = {
+                'element_id': getattr(element, 'id', None),
+                'element_type': element.__class__.__name__ if element else 'Unknown',
+                'mount_type': mount_type_name
+            }
+        return info
+
     # --- VEIL Production (Optional) ---
     def produce_veil_structure(self) -> List[Dict[str, Any]]:
         """Produces a VEIL structure for the mounted elements."""

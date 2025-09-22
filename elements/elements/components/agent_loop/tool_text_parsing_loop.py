@@ -89,6 +89,7 @@ class ToolTextParsingLoopComponent(BaseAgentLoopComponent):
         except Exception:
             pass
 
+        completion_id = None
         try:
             # 1. Aggregate tools and build element name mapping
             aggregated_tools = await self.aggregate_tools()
@@ -172,13 +173,26 @@ class ToolTextParsingLoopComponent(BaseAgentLoopComponent):
                 logger.warning(f"Failed to cache LLM context: {cache_error}")
 
             # 4. Send rendered context to LLM (no separate tool definitions - they're in the context)
+            # Start typing notifications using base class method
+            completion_id = await self._start_typing_notifications(focus_context)
+
             # NOTE: We don't pass tools parameter to LLM since they're already rendered in the context
             # Metadata now travels with LLMMessage objects, no need for original_context_data
-            if self._is_cancelled():
-                raise Exception("Agent loop preempted before LLM call")
-            llm_response_obj = llm_provider.complete(messages=messages, tools=[])
-            if self._is_cancelled():
-                raise Exception("Agent loop preempted after LLM call")
+            try:
+                if self._is_cancelled():
+                    raise Exception("Agent loop preempted before LLM call")
+                llm_response_obj = llm_provider.complete(messages=messages, tools=[])
+                if self._is_cancelled():
+                    raise Exception("Agent loop preempted after LLM call")
+            except Exception as llm_error:
+                # End typing tracking on error
+                if completion_id:
+                    self.end_completion_tracking(completion_id)
+                raise llm_error
+            finally:
+                # Always end typing tracking after LLM completion (success or failure)
+                if completion_id:
+                    self.end_completion_tracking(completion_id)
 
             if not llm_response_obj:
                 logger.warning(f"{self.agent_loop_name} ({self.id}): LLM returned no response. Aborting cycle.")
@@ -247,6 +261,10 @@ class ToolTextParsingLoopComponent(BaseAgentLoopComponent):
                 self._reset_cancel()
             logger.error(f"{self.agent_loop_name} ({self.id}): Error during text-parsing cycle: {e}", exc_info=True)
         finally:
+            # Clean up typing tracking if it was started
+            if completion_id:
+                logger.debug(f"Final cleanup: ending completion tracking for {completion_id}")
+                self.end_completion_tracking(completion_id)
             logger.info(f"{self.agent_loop_name} ({self.id}): Text-parsing cycle completed.")
 
     def _build_element_name_mapping(self, enhanced_tools: List[Dict[str, Any]]):

@@ -77,7 +77,7 @@ class ActivityClient:
         self._pending_io_requests: Dict[str, Dict[str, Any]] = {}
 
         # NEW: Keepalive and idle state management
-        self._keepalive_interval = 30  # Send keepalive every 30 seconds (must be less than Socket.IO timeout of 60s)
+        self._keepalive_interval = 5   # Send keepalive every 5 seconds (local adapter, high-frequency monitoring)
         self._idle_threshold = 300  # Consider connection idle after 5 minutes
         self._last_activity: Dict[str, float] = {}  # adapter_id -> timestamp of last activity
         self._keepalive_tasks: Dict[str, asyncio.Task] = {}  # adapter_id -> keepalive task
@@ -834,14 +834,8 @@ class ActivityClient:
                     if hasattr(client.eio, 'state') and client.eio.state != 'connected':
                         connection_issues.append(f"Engine.IO state is '{client.eio.state}', not 'connected'")
 
-                    # Check packet queue state more thoroughly
+                    # Check if transport is available and healthy
                     if hasattr(client.eio, 'queue'):
-                        if hasattr(client.eio.queue, 'empty') and client.eio.queue.empty():
-                            connection_issues.append("Engine.IO packet queue is empty")
-                        elif hasattr(client.eio.queue, 'qsize') and client.eio.queue.qsize() == 0:
-                            connection_issues.append("Engine.IO packet queue size is 0")
-
-                        # Check if transport is available and healthy
                         if hasattr(client.eio, 'transport') and client.eio.transport:
                             if hasattr(client.eio.transport, 'state') and client.eio.transport.state != 'open':
                                 connection_issues.append(f"Transport state is '{client.eio.transport.state}', not 'open'")
@@ -1243,3 +1237,7 @@ class ActivityClient:
                 setattr(self, f'_timeout_count_{adapter_id}', 0)
                 # Reset success counter to prevent it from growing indefinitely
                 self._successful_operations[adapter_id] = 0
+
+    # NEW: Methods for SpaceRegistry socket client compatibility
+
+

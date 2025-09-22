@@ -4,6 +4,8 @@ Defines the abstract base class for agent cognitive cycles.
 """
 import logging
 import asyncio
+import uuid
+import time
 from typing import Dict, Any, Optional, TYPE_CHECKING, List, Set, Type, Union
 from datetime import datetime
 
@@ -81,6 +83,9 @@ class BaseAgentLoopComponent(Component):
 
         # NEW: Cooperative cancellation confirmation event
         self._cancel_event: asyncio.Event = asyncio.Event()
+        
+        # NEW: Track active LLM completions for typing notifications
+        self._active_completions: Dict[str, Dict[str, Any]] = {}  # completion_id -> context
 
         # Convenience accessors, assuming parent_inner_space is correctly typed and populated
         self._llm_provider: Optional['LLMProvider'] = self.parent_inner_space._llm_provider
@@ -164,6 +169,7 @@ class BaseAgentLoopComponent(Component):
             inner_payload = event_payload.get('payload', {})
             focus_context = inner_payload.get('focus_context', {})
             focus_element_id = focus_context.get('focus_element_id')
+            
 
             if focus_element_id:
                 logger.info(f"[{self.agent_loop_name}] Activation with focused context on element: {focus_element_id}")
@@ -260,6 +266,135 @@ class BaseAgentLoopComponent(Component):
             return self.parent_inner_space.id
 
         return None
+
+    def start_completion_tracking(self, adapter_id: str, chat_id: str, focus_element_id: Optional[str] = None) -> str:
+        """
+        Start tracking an active LLM completion for typing notifications.
+        
+        Args:
+            adapter_id: ID of the adapter for sending typing indicators
+            chat_id: ID of the chat/conversation
+            focus_element_id: Optional element ID that has focus
+            
+        Returns:
+            Unique completion ID for this tracking session
+        """
+        completion_id = str(uuid.uuid4())
+        self._active_completions[completion_id] = {
+            'start_time': time.time(),
+            'adapter_id': adapter_id,
+            'chat_id': chat_id,
+            'focus_element_id': focus_element_id
+        }
+        logger.debug(f"[{self.agent_loop_name}] Started tracking completion {completion_id[:8]} for {adapter_id}/{chat_id}")
+        return completion_id
+    
+    def end_completion_tracking(self, completion_id: str) -> None:
+        """
+        End tracking for a completed or failed LLM completion.
+        
+        Args:
+            completion_id: The ID returned from start_completion_tracking
+        """
+        if completion_id in self._active_completions:
+            context = self._active_completions[completion_id]
+            duration = time.time() - context['start_time']
+            logger.debug(f"[{self.agent_loop_name}] Ended tracking completion {completion_id[:8]} after {duration:.1f}s")
+            del self._active_completions[completion_id]
+    
+    def get_active_completions(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all currently active LLM completions being tracked.
+
+        Returns:
+            Dictionary of completion_id -> context for all active completions
+        """
+        return self._active_completions.copy()
+
+    def _extract_typing_context_from_focus(self, focus_context: Optional[Dict[str, Any]]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """
+        Extract adapter ID, chat ID, and focus element ID from focus context for typing notifications.
+
+        This centralizes the logic for finding typing context information that was duplicated
+        across agent loop implementations.
+
+        Args:
+            focus_context: Focus context from activation event
+
+        Returns:
+            Tuple of (adapter_id, chat_id, focus_element_id) or (None, None, None) if not found
+        """
+        try:
+            if not focus_context:
+                return None, None, None
+
+            focus_element_id = focus_context.get('focus_element_id')
+            if not focus_element_id:
+                return None, None, None
+
+            # Get the element to find its conversation ID
+            element = self.parent_inner_space.get_element_by_id(focus_element_id)
+            if not element:
+                return None, None, focus_element_id
+
+            # Look for conversation ID in element or its parent
+            chat_id = getattr(element, 'external_conversation_id', None) or \
+                     getattr(element, 'conversation_id', None)
+            adapter_id = getattr(element, 'adapter_id', None)
+
+            # If not on element, check parent space
+            if not adapter_id or not chat_id:
+                parent_space = getattr(element, 'get_parent_object', lambda: None)()
+                if parent_space:
+                    chat_id = chat_id or getattr(parent_space, 'external_conversation_id', None)
+                    adapter_id = adapter_id or getattr(parent_space, 'adapter_id', None)
+
+            return adapter_id, chat_id, focus_element_id
+
+        except Exception as e:
+            logger.warning(f"[{self.agent_loop_name}] Error extracting typing context: {e}")
+            return None, None, None
+
+    async def _start_typing_notifications(self, focus_context: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """
+        Start typing notifications for this agent loop cycle.
+
+        This method combines the initial typing indicator and completion tracking setup
+        that was duplicated across agent loop implementations.
+
+        Args:
+            focus_context: Optional focus context from activation event
+
+        Returns:
+            Completion ID if tracking was started, None otherwise
+        """
+        try:
+            adapter_id, chat_id, focus_element_id = self._extract_typing_context_from_focus(focus_context)
+
+            if not adapter_id or not chat_id:
+                logger.debug(f"[{self.agent_loop_name}] Could not extract typing context - adapter_id: {adapter_id}, chat_id: {chat_id}")
+                return None
+
+            # Send initial typing indicator through ActivityStatusComponent
+            try:
+                activity_status_component = self.parent_inner_space.get_component_by_type("ActivityStatusComponent")
+                if activity_status_component:
+                    await activity_status_component.handle_typing_indicator(adapter_id, chat_id, is_typing=True)
+                    logger.debug(f"[{self.agent_loop_name}] Sent initial typing indicator for {adapter_id}/{chat_id}")
+                else:
+                    logger.debug(f"[{self.agent_loop_name}] No ActivityStatusComponent found for typing indicator")
+            except Exception as e:
+                logger.debug(f"[{self.agent_loop_name}] Could not send initial typing indicator: {e}")
+
+            # Start completion tracking
+            completion_id = self.start_completion_tracking(adapter_id, chat_id, focus_element_id)
+            logger.debug(f"[{self.agent_loop_name}] Started typing tracking for {adapter_id}/{chat_id}")
+
+            return completion_id
+
+        except Exception as e:
+            logger.warning(f"[{self.agent_loop_name}] Error starting typing notifications: {e}")
+            return None
 
     def _resolve_prefix_to_element_id(self, prefix: str) -> Optional[str]:
         """

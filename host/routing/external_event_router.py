@@ -1335,6 +1335,12 @@ class ExternalEventRouter:
                 "attachment_id": payload.get("attachment_id")
             })
 
+        elif action_type == "send_typing_indicator":
+            clean_payload.update({
+                "conversation_id": conversation_id
+                # Note: is_typing field omitted - adapter protocol only expects conversation_id
+            })
+
         else:
             logger.warning(f"Unknown action_type '{action_type}' in outgoing action preprocessing. Passing through with minimal changes.")
             clean_payload.update(payload)  # Pass through unknown actions

@@ -109,8 +109,24 @@ class SimpleRequestResponseLoopComponent(BaseAgentLoopComponent):
                 logger.warning(f"Failed to cache LLM context: {cache_error}")
 
             # 4. Send rendered context + tools to LLM
+            # Start typing notifications using base class method
+            completion_id = await self._start_typing_notifications(focus_context)
+            
             # Metadata now travels with LLMMessage objects, no need for original_context_data
-            llm_response_obj = llm_provider.complete(messages=messages, tools=aggregated_tools)
+            try:
+                llm_response_obj = llm_provider.complete(messages=messages, tools=aggregated_tools)
+                logger.debug(f"LLM completion successful, ending typing tracking")
+            except Exception as llm_error:
+                logger.error(f"LLM completion failed: {llm_error}", exc_info=True)
+                # End typing tracking on error
+                if completion_id:
+                    self.end_completion_tracking(completion_id)
+                raise llm_error
+            finally:
+                # Always end typing tracking after LLM completion (success or failure)
+                if completion_id:
+                    self.end_completion_tracking(completion_id)
+                    completion_id = None  # Clear to prevent double cleanup in finally block
 
             if not llm_response_obj:
                 logger.warning(f"{self.agent_loop_name} ({self.id}): LLM returned no response. Aborting cycle.")
@@ -212,4 +228,8 @@ class SimpleRequestResponseLoopComponent(BaseAgentLoopComponent):
         except Exception as e:
             logger.error(f"{self.agent_loop_name} ({self.id}): Error during simple cycle: {e}", exc_info=True)
         finally:
+            # Clean up typing tracking if it was started and not already cleaned up
+            if completion_id:
+                logger.debug(f"Final cleanup: ending completion tracking for {completion_id}")
+                self.end_completion_tracking(completion_id)
             logger.info(f"{self.agent_loop_name} ({self.id}): Simple cycle with memory completed.")

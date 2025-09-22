@@ -206,6 +206,7 @@ async def amain():
     # NEW: Set ActivityClient reference in ExternalEventRouter for outgoing action dispatch
     external_event_router.set_activity_client(activity_client)
     logger.info("ExternalEventRouter configured with ActivityClient reference for action preprocessing")
+
     
     # After component scanning, we can validate agent configurations
     logger.info("Processing agent configurations...")
