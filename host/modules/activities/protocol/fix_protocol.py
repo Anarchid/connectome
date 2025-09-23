@@ -66,7 +66,7 @@ class ProtocolMessage:
         )
 
 
-@dataclass 
+@dataclass
 class ProtocolState:
     """State for one direction of communication"""
     sequence: int = 0
@@ -107,10 +107,10 @@ class FIXProtocol:
         
         # Independent state for each peer
         self.peer_states: Dict[str, ProtocolState] = {}
-        
+
         # Storage for retransmission
         self.message_storage: OrderedDict[int, ProtocolMessage] = OrderedDict()
-        
+
         # My outbound sequence counter (shared across all peers)
         self.outbound_sequence = 0
         
@@ -337,7 +337,6 @@ class FIXProtocol:
                 'to_sequence': peer_outbound,
                 'requester': self.node_id
             })
-            
         self.logger.info(f"Sequence sync acknowledged by {peer_id}. They're at seq {peer_outbound}, expecting {peer_expects}")
 
     async def initiate_protocol_reset(self, peer_id: str, reason: str = "Manual reset") -> None:
